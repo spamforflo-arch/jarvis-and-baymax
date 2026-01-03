@@ -11,8 +11,8 @@ const ChatMessage = ({ role, content }: ChatMessageProps) => {
   return (
     <div className={`flex gap-3 fade-in ${isUser ? "flex-row-reverse" : ""}`}>
       <div
-        className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-          isUser ? "bg-primary/20 text-primary" : "bg-surface-2 text-muted-foreground"
+        className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center pastel-border ${
+          isUser ? "bg-primary/15 text-primary" : "bg-surface-2 text-muted-foreground"
         }`}
       >
         {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
