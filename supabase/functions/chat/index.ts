@@ -11,16 +11,28 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, webEnabled } = await req.json();
+    const { messages, webEnabled, isVoiceMode } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    const systemPrompt = webEnabled
-      ? `You are Jarvis, a warm and intelligent AI assistant. You have access to real-time web information and provide accurate, helpful responses. Be concise but thorough. Speak in a friendly, warm tone.`
-      : `You are Jarvis, a warm and intelligent AI assistant. You provide helpful responses based on your knowledge. Be concise but thorough. Speak in a friendly, warm tone.`;
+    // Different prompts for voice vs text mode
+    let systemPrompt: string;
+    
+    if (isVoiceMode) {
+      // Voice mode: Simple, friendly, concise responses like Baymax
+      systemPrompt = `You are Baymax, a warm and caring AI companion. Keep responses SHORT (1-2 sentences max). Be friendly, gentle, and helpful like a caring friend. Use simple language. Never make up facts - if you don't know something, say so honestly. For basic questions, give direct simple answers.`;
+    } else if (webEnabled) {
+      // Text mode with web: Detailed, accurate, complex reasoning
+      systemPrompt = `You are Jarvis, an intelligent and thorough AI assistant. Provide detailed, accurate, and well-researched responses. For complex questions, break down your reasoning. Be precise and factual - NEVER fabricate information. If you're uncertain about something, clearly state your uncertainty. Use your knowledge comprehensively but acknowledge when a question might benefit from real-time information you don't have access to.`;
+    } else {
+      // Text mode offline: Basic general knowledge only
+      systemPrompt = `You are Jarvis, a helpful AI assistant. Answer ONLY from well-established, commonly known facts. Keep responses helpful but acknowledge when you don't know something. NEVER make up information, statistics, dates, or specific details you're not certain about. For complex or specialized topics, recommend the user enable web search for accurate information. Focus on basic general knowledge that is commonly understood.`;
+    }
+
+    console.log("Chat request - webEnabled:", webEnabled, "isVoiceMode:", isVoiceMode);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
