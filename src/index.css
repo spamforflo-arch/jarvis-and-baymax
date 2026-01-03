@@ -15,7 +15,7 @@
     --popover: 220 25% 8%;
     --popover-foreground: 200 20% 90%;
 
-    --primary: 185 80% 50%;
+    --primary: 195 60% 65%;
     --primary-foreground: 220 25% 6%;
 
     --secondary: 220 20% 14%;
@@ -24,7 +24,7 @@
     --muted: 220 20% 12%;
     --muted-foreground: 200 15% 55%;
 
-    --accent: 185 80% 50%;
+    --accent: 195 60% 65%;
     --accent-foreground: 220 25% 6%;
 
     --destructive: 0 70% 50%;
@@ -32,13 +32,14 @@
 
     --border: 220 20% 18%;
     --input: 220 20% 14%;
-    --ring: 185 80% 50%;
+    --ring: 195 60% 65%;
 
     --radius: 0.75rem;
 
-    /* Custom colors */
-    --cyan-glow: 185 80% 50%;
-    --cyan-dim: 185 60% 35%;
+    /* Custom pastel colors */
+    --pastel-blue: 195 60% 65%;
+    --pastel-blue-dim: 195 40% 45%;
+    --pastel-glow: 195 60% 70%;
     --surface-1: 220 25% 10%;
     --surface-2: 220 25% 14%;
     --text-primary: 200 20% 90%;
@@ -46,22 +47,22 @@
     --text-muted: 200 10% 40%;
 
     /* Gradients */
-    --gradient-glow: linear-gradient(135deg, hsl(185 80% 50% / 0.15), hsl(200 80% 50% / 0.05));
+    --gradient-glow: linear-gradient(135deg, hsl(195 60% 65% / 0.15), hsl(210 60% 60% / 0.05));
     --gradient-surface: linear-gradient(180deg, hsl(220 25% 12%), hsl(220 25% 8%));
 
     /* Shadows */
-    --shadow-glow: 0 0 20px hsl(185 80% 50% / 0.3);
-    --shadow-glow-sm: 0 0 10px hsl(185 80% 50% / 0.2);
+    --shadow-glow: 0 0 20px hsl(195 60% 65% / 0.25);
+    --shadow-glow-sm: 0 0 10px hsl(195 60% 65% / 0.15);
     --shadow-soft: 0 4px 20px hsl(220 25% 0% / 0.5);
 
     --sidebar-background: 220 25% 8%;
     --sidebar-foreground: 200 20% 90%;
-    --sidebar-primary: 185 80% 50%;
+    --sidebar-primary: 195 60% 65%;
     --sidebar-primary-foreground: 220 25% 6%;
     --sidebar-accent: 220 20% 14%;
     --sidebar-accent-foreground: 200 20% 90%;
     --sidebar-border: 220 20% 18%;
-    --sidebar-ring: 185 80% 50%;
+    --sidebar-ring: 195 60% 65%;
   }
 }
 
@@ -82,13 +83,20 @@
 
 @layer components {
   .glow-text {
-    text-shadow: 0 0 10px hsl(var(--cyan-glow) / 0.5),
-                 0 0 20px hsl(var(--cyan-glow) / 0.3);
+    text-shadow: 0 0 10px hsl(var(--pastel-glow) / 0.4),
+                 0 0 20px hsl(var(--pastel-glow) / 0.2);
   }
 
   .glow-border {
-    box-shadow: 0 0 10px hsl(var(--cyan-glow) / 0.3),
-                inset 0 0 10px hsl(var(--cyan-glow) / 0.1);
+    box-shadow: 0 0 10px hsl(var(--pastel-glow) / 0.2),
+                inset 0 0 10px hsl(var(--pastel-glow) / 0.05);
+    border: 1px solid hsl(var(--pastel-blue) / 0.3);
+  }
+
+  .pastel-border {
+    border: 1px solid hsl(var(--pastel-blue) / 0.25);
+    box-shadow: 0 0 15px hsl(var(--pastel-blue) / 0.1),
+                inset 0 1px 0 hsl(var(--pastel-blue) / 0.1);
   }
 
   .surface-glow {
@@ -99,17 +107,20 @@
   .glass-panel {
     background: hsl(var(--surface-1) / 0.8);
     backdrop-filter: blur(20px);
-    border: 1px solid hsl(var(--border) / 0.5);
+    border: 1px solid hsl(var(--pastel-blue) / 0.15);
+    box-shadow: 0 0 20px hsl(var(--pastel-blue) / 0.08);
   }
 
   .chat-bubble-user {
-    background: linear-gradient(135deg, hsl(var(--primary) / 0.2), hsl(var(--primary) / 0.1));
-    border: 1px solid hsl(var(--primary) / 0.3);
+    background: linear-gradient(135deg, hsl(var(--primary) / 0.15), hsl(var(--primary) / 0.08));
+    border: 1px solid hsl(var(--primary) / 0.25);
+    box-shadow: 0 0 10px hsl(var(--primary) / 0.1);
   }
 
   .chat-bubble-assistant {
-    background: hsl(var(--surface-2));
-    border: 1px solid hsl(var(--border));
+    background: hsl(var(--surface-2) / 0.9);
+    border: 1px solid hsl(var(--pastel-blue) / 0.2);
+    box-shadow: 0 0 10px hsl(var(--pastel-blue) / 0.08);
   }
 
   .mode-toggle-active {
@@ -129,12 +140,12 @@
   }
 
   .web-toggle-track[data-state="checked"] {
-    background: hsl(var(--primary) / 0.3);
-    border-color: hsl(var(--primary) / 0.5);
+    background: hsl(var(--primary) / 0.25);
+    border-color: hsl(var(--primary) / 0.4);
   }
 
   .baymax-face {
-    filter: drop-shadow(0 0 30px hsl(var(--cyan-glow) / 0.4));
+    filter: drop-shadow(0 0 30px hsl(var(--pastel-glow) / 0.3));
   }
 
   .baymax-eye {

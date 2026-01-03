@@ -3,6 +3,8 @@ import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import WebToggle from "./WebToggle";
 import { Sparkles } from "lucide-react";
+import { useStreamChat } from "@/hooks/useStreamChat";
+import { toast } from "sonner";
 
 interface Message {
   id: string;
@@ -13,8 +15,8 @@ interface Message {
 const TextMode = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [webEnabled, setWebEnabled] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { streamChat, isLoading } = useStreamChat();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -31,29 +33,52 @@ const TextMode = () => {
       content,
     };
     setMessages((prev) => [...prev, userMessage]);
-    setIsTyping(true);
 
-    // Simulate AI response (replace with actual AI integration)
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: webEnabled
-          ? `I searched the web and found relevant information about "${content}". This is a demo response - connect to an AI backend for real responses.`
-          : `Based on my stored knowledge about "${content}": This is a demo response using offline knowledge. Connect to an AI backend for real responses.`,
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      setIsTyping(false);
-    }, 1500);
+    let assistantContent = "";
+    const assistantId = (Date.now() + 1).toString();
+
+    // Add placeholder assistant message
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "" },
+    ]);
+
+    const chatMessages = [...messages, userMessage].map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    await streamChat({
+      messages: chatMessages,
+      webEnabled,
+      onDelta: (delta) => {
+        assistantContent += delta;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: assistantContent } : m
+          )
+        );
+      },
+      onDone: () => {
+        // Done streaming
+      },
+      onError: (error) => {
+        toast.error(error);
+        // Remove the empty assistant message on error
+        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+      },
+    });
   };
 
   return (
     <div className="flex flex-col h-full slide-up">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-surface-1 border-b border-border">
+      <div className="flex items-center justify-between px-4 py-3 glass-panel border-b border-border/50">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-primary" />
-          <span className="font-semibold text-foreground">Buddy AI</span>
+          <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center glow-border">
+            <Sparkles className="w-4 h-4 text-primary" />
+          </div>
+          <span className="font-semibold text-foreground">Warm AI</span>
         </div>
         <WebToggle enabled={webEnabled} onToggle={setWebEnabled} />
       </div>
@@ -62,8 +87,8 @@ const TextMode = () => {
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-              <Sparkles className="w-8 h-8 text-primary" />
+            <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4 glow-border">
+              <Sparkles className="w-10 h-10 text-primary" />
             </div>
             <h2 className="text-xl font-semibold text-foreground mb-2">
               How can I help you?
@@ -81,13 +106,13 @@ const TextMode = () => {
                 content={message.content}
               />
             ))}
-            {isTyping && (
+            {isLoading && messages[messages.length - 1]?.content === "" && (
               <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center pastel-border">
                   <div className="flex gap-1">
-                    <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                   </div>
                 </div>
               </div>
@@ -98,7 +123,7 @@ const TextMode = () => {
       </div>
 
       {/* Input */}
-      <ChatInput onSend={handleSend} disabled={isTyping} />
+      <ChatInput onSend={handleSend} disabled={isLoading} />
     </div>
   );
 };

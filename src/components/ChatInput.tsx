@@ -24,7 +24,7 @@ const ChatInput = ({ onSend, disabled }: ChatInputProps) => {
   };
 
   return (
-    <div className="relative flex items-end gap-2 p-4 bg-surface-1 border-t border-border">
+    <div className="relative flex items-end gap-2 p-4 glass-panel border-t border-border/50">
       <div className="flex-1 relative">
         <textarea
           value={input}
@@ -33,7 +33,7 @@ const ChatInput = ({ onSend, disabled }: ChatInputProps) => {
           placeholder="Type a message..."
           disabled={disabled}
           rows={1}
-          className="w-full px-4 py-3 pr-12 bg-surface-2 border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all"
+          className="w-full px-4 py-3 pr-12 bg-surface-2/80 pastel-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all"
           style={{ minHeight: "48px", maxHeight: "120px" }}
         />
       </div>

@@ -7,7 +7,7 @@ interface ModeToggleProps {
 
 const ModeToggle = ({ mode, onModeChange }: ModeToggleProps) => {
   return (
-    <div className="flex items-center gap-1 p-1 rounded-full bg-surface-1 border border-border">
+    <div className="flex items-center gap-1 p-1 rounded-full bg-surface-1 pastel-border">
       <button
         onClick={() => onModeChange("text")}
         className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-300 ${
@@ -15,7 +15,7 @@ const ModeToggle = ({ mode, onModeChange }: ModeToggleProps) => {
         }`}
       >
         <MessageSquare className="w-4 h-4" />
-        <span>Text</span>
+        <span>Jarvis</span>
       </button>
       <button
         onClick={() => onModeChange("voice")}
@@ -24,7 +24,7 @@ const ModeToggle = ({ mode, onModeChange }: ModeToggleProps) => {
         }`}
       >
         <Mic className="w-4 h-4" />
-        <span>Voice</span>
+        <span>Baymax</span>
       </button>
     </div>
   );
