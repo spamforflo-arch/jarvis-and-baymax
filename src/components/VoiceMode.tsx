@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import BaymaxFace from "./BaymaxFace";
-import { Volume2, VolumeX } from "lucide-react";
+import { Volume2, VolumeX, Square } from "lucide-react";
 import { useVoiceRecognition } from "@/hooks/useVoiceRecognition";
 import { useTextToSpeech } from "@/hooks/useTextToSpeech";
 import { usePhoneActions } from "@/hooks/usePhoneActions";
@@ -13,13 +13,47 @@ const VoiceMode = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [lastResponse, setLastResponse] = useState<string>("");
   const processingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const { speak, stop: stopSpeaking, isSpeaking, isSupported: ttsSupported, voicesLoaded } = useTextToSpeech({
-    rate: 0.95,
-    pitch: 1.1,
+    rate: 1.0,
+    pitch: 1.0,
   });
 
   const { checkAndExecute } = usePhoneActions();
+
+  const stopEverything = useCallback(() => {
+    console.log("Stopping everything");
+    // Abort any ongoing fetch
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    // Stop speech
+    stopSpeaking();
+    processingRef.current = false;
+    setVoiceState("idle");
+  }, [stopSpeaking]);
+
+  const speakResponse = useCallback(async (text: string) => {
+    if (!text || isMuted || !ttsSupported) {
+      console.log("Skipping TTS - muted:", isMuted, "supported:", ttsSupported);
+      setVoiceState("idle");
+      return;
+    }
+
+    console.log("Starting TTS for response");
+    setVoiceState("speaking");
+    
+    try {
+      await speak(text);
+      console.log("TTS completed");
+    } catch (err) {
+      console.error("TTS error:", err);
+    } finally {
+      setVoiceState("idle");
+    }
+  }, [isMuted, ttsSupported, speak]);
 
   const handleVoiceResult = useCallback(async (transcript: string) => {
     if (!transcript.trim() || processingRef.current) return;
@@ -35,16 +69,13 @@ const VoiceMode = () => {
     if (phoneAction.handled) {
       console.log("Phone action handled:", phoneAction.response);
       setLastResponse(phoneAction.response);
-      
-      if (!isMuted && ttsSupported && voicesLoaded) {
-        setVoiceState("speaking");
-        speak(phoneAction.response);
-      } else {
-        setVoiceState("idle");
-      }
       processingRef.current = false;
+      await speakResponse(phoneAction.response);
       return;
     }
+
+    // Create abort controller for this request
+    abortControllerRef.current = new AbortController();
 
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`, {
@@ -58,6 +89,7 @@ const VoiceMode = () => {
           webEnabled: false,
           isVoiceMode: true,
         }),
+        signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
@@ -93,28 +125,27 @@ const VoiceMode = () => {
         }
       }
 
-      console.log("AI response:", fullResponse);
+      console.log("AI response received:", fullResponse);
       setLastResponse(fullResponse || "I'm here to help!");
+      processingRef.current = false;
       
-      if (!isMuted && ttsSupported && voicesLoaded && fullResponse) {
-        setVoiceState("speaking");
-        // Small delay to ensure state updates
-        setTimeout(() => {
-          speak(fullResponse);
-        }, 50);
-      } else {
-        console.log("Not speaking - muted:", isMuted, "ttsSupported:", ttsSupported, "voicesLoaded:", voicesLoaded);
-        setVoiceState("idle");
-      }
+      // Speak the response
+      await speakResponse(fullResponse || "I'm here to help!");
+      
     } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        console.log("Request aborted");
+        return;
+      }
       console.error("Voice chat error:", error);
       toast.error("Failed to process your request");
       setVoiceState("error");
       setTimeout(() => setVoiceState("idle"), 2000);
     } finally {
       processingRef.current = false;
+      abortControllerRef.current = null;
     }
-  }, [isMuted, speak, ttsSupported, voicesLoaded, checkAndExecute]);
+  }, [checkAndExecute, speakResponse]);
 
   const { 
     isListening, 
@@ -125,7 +156,7 @@ const VoiceMode = () => {
     isSupported: sttSupported,
     error: sttError
   } = useVoiceRecognition({
-    wakeWords: ["wake up buddy", "wake up baymax", "hey buddy", "hey baymax"],
+    wakeWords: ["wake up buddy", "wake up max"],
     onWakeWord: () => {
       if (voiceState === "idle") {
         startVoiceInteraction();
@@ -136,24 +167,23 @@ const VoiceMode = () => {
   // Watch for TTS completion
   useEffect(() => {
     if (voiceState === "speaking" && !isSpeaking) {
-      // Small delay to ensure speech has actually finished
       const timer = setTimeout(() => {
-        if (!isSpeaking) {
+        if (!isSpeaking && voiceState === "speaking") {
           setVoiceState("idle");
         }
-      }, 200);
+      }, 300);
       return () => clearTimeout(timer);
     }
   }, [isSpeaking, voiceState]);
 
   // Update voice state based on listening
   useEffect(() => {
-    if (isListening && voiceState !== "listening" && voiceState !== "thinking" && voiceState !== "speaking") {
+    if (isListening && voiceState === "idle") {
       setVoiceState("listening");
     }
   }, [isListening, voiceState]);
 
-  // Handle transcript completion - process when listening ends with final transcript
+  // Handle transcript completion
   useEffect(() => {
     if (!isListening && transcript && voiceState === "listening" && !processingRef.current) {
       console.log("Transcript complete, processing:", transcript);
@@ -168,14 +198,11 @@ const VoiceMode = () => {
       return;
     }
     
-    // Stop any ongoing speech first
-    stopSpeaking();
-    processingRef.current = false;
-    
+    stopEverything();
     resetTranscript();
     startListening();
     setVoiceState("listening");
-  }, [sttSupported, resetTranscript, startListening, stopSpeaking]);
+  }, [sttSupported, resetTranscript, startListening, stopEverything]);
 
   const handleFaceClick = useCallback(() => {
     console.log("Face clicked, current state:", voiceState);
@@ -184,15 +211,10 @@ const VoiceMode = () => {
       startVoiceInteraction();
     } else if (voiceState === "listening") {
       stopListening();
-    } else if (voiceState === "speaking") {
-      stopSpeaking();
-      setVoiceState("idle");
-    } else if (voiceState === "thinking") {
-      // Allow canceling during thinking
-      processingRef.current = false;
-      setVoiceState("idle");
+    } else if (voiceState === "speaking" || voiceState === "thinking") {
+      stopEverything();
     }
-  }, [voiceState, startVoiceInteraction, stopListening, stopSpeaking]);
+  }, [voiceState, startVoiceInteraction, stopListening, stopEverything]);
 
   const handleMuteToggle = useCallback(() => {
     setIsMuted(!isMuted);
@@ -202,10 +224,20 @@ const VoiceMode = () => {
     }
   }, [isMuted, isSpeaking, stopSpeaking]);
 
+  const isProcessing = voiceState === "thinking" || voiceState === "speaking" || voiceState === "listening";
+
   return (
     <div className="flex flex-col items-center justify-center h-full px-6 slide-up">
       {/* Top controls */}
-      <div className="absolute top-4 right-4">
+      <div className="absolute top-4 right-4 flex gap-2">
+        {isProcessing && (
+          <button
+            onClick={stopEverything}
+            className="w-10 h-10 rounded-full flex items-center justify-center transition-all pastel-border bg-destructive/20 text-destructive hover:bg-destructive/30"
+          >
+            <Square className="w-4 h-4 fill-current" />
+          </button>
+        )}
         <button
           onClick={handleMuteToggle}
           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all pastel-border ${
@@ -249,7 +281,7 @@ const VoiceMode = () => {
       <div className="pb-8">
         <p className="text-xs text-muted-foreground/60 text-center">
           {sttSupported 
-            ? 'Say "Hey Buddy" or tap the face'
+            ? 'Say "Wake up Buddy" or tap the face'
             : 'Tap the face to speak'}
         </p>
         {sttError && (
