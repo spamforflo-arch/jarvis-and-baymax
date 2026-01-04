@@ -156,12 +156,15 @@ const VoiceMode = () => {
     isSupported: sttSupported,
     error: sttError
   } = useVoiceRecognition({
-    wakeWords: ["wake up buddy", "wake up max"],
+    wakeWords: ["wake up buddy", "wake up max", "wakeup buddy", "wakeup max"],
     onWakeWord: () => {
+      console.log("Wake word detected!");
       if (voiceState === "idle") {
+        toast.success("I'm listening!");
         startVoiceInteraction();
       }
     },
+    continuous: true,
   });
 
   // Watch for TTS completion

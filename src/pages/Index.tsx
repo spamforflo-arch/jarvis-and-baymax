@@ -8,8 +8,9 @@ const Index = () => {
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Header with mode toggle */}
-      <header className="flex-shrink-0 flex items-center justify-center py-4 px-4 bg-background/80 backdrop-blur-lg border-b border-border/50 z-10">
+      {/* Header with app name and mode toggle */}
+      <header className="flex-shrink-0 flex items-center justify-between py-4 px-5 bg-background/80 backdrop-blur-lg border-b border-border/50 z-10">
+        <h1 className="text-lg font-semibold text-primary glow-text tracking-wide">Warm AI</h1>
         <ModeToggle mode={mode} onModeChange={setMode} />
       </header>
 

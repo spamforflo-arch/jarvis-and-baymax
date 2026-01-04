@@ -75,10 +75,10 @@ const TextMode = () => {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 glass-panel border-b border-border/40">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center pastel-border">
+          <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center pastel-border">
             <Sparkles className="w-4 h-4 text-primary" />
           </div>
-          <span className="font-semibold text-foreground">Jarvis</span>
+          <span className="font-semibold text-primary">Jarvis</span>
         </div>
         <WebToggle enabled={webEnabled} onToggle={setWebEnabled} />
       </div>
