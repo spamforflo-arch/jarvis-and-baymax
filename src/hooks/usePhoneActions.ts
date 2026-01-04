@@ -61,17 +61,25 @@ export const parsePhoneAction = (transcript: string): PhoneAction | null => {
     }
   }
   
-  // Music/Spotify patterns
-  if (lower.includes('play ') && (lower.includes('spotify') || lower.includes('music') || lower.includes('song'))) {
-    const queryMatch = lower.match(/play\s+(.+?)(?:\s+on\s+spotify)?$/i);
-    return {
-      type: 'play_music',
-      query: queryMatch ? queryMatch[1].trim() : undefined,
-      app: 'spotify'
-    };
+  // Music/Spotify patterns - expanded detection
+  if (lower.includes('play ')) {
+    // Extract what to play - remove common prefixes
+    let query = lower.replace(/^.*?play\s+/, '').trim();
+    // Remove trailing "on spotify", "on music", etc.
+    query = query.replace(/\s+on\s+(spotify|music).*$/i, '').trim();
+    // Remove "music", "song", "spotify" from the end if standalone
+    query = query.replace(/\s+(music|song|spotify)$/i, '').trim();
+    
+    if (query && query !== 'spotify' && query !== 'music') {
+      return {
+        type: 'play_music',
+        query: query,
+        app: 'spotify'
+      };
+    }
   }
   
-  if (lower.includes('play spotify') || lower.includes('open spotify')) {
+  if (lower.includes('play spotify') || lower.includes('open spotify') || lower === 'spotify') {
     return {
       type: 'open_app',
       app: 'spotify'
@@ -170,17 +178,39 @@ export const usePhoneActions = () => {
       
       case 'play_music': {
         const query = action.query || '';
-        // Try Spotify URL scheme
+        // Use Spotify deep link to search and play
         try {
           if (query) {
-            window.location.href = `spotify:search:${encodeURIComponent(query)}`;
+            // Try native app first with search
+            const spotifySearchUrl = `spotify:search:${encodeURIComponent(query)}`;
+            const webFallback = `https://open.spotify.com/search/${encodeURIComponent(query)}`;
+            
+            // Create hidden iframe to try native URL
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = spotifySearchUrl;
+            document.body.appendChild(iframe);
+            
+            // Fallback to web after short delay
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+              window.open(webFallback, '_blank');
+            }, 1500);
+            
+            toast.success(`Playing "${query}" on Spotify`);
+            return `Opening Spotify to play ${query}. The music should start shortly!`;
           } else {
             window.location.href = 'spotify://';
+            return 'Opening Spotify...';
           }
-          return `Opening Spotify${query ? ` to play ${query}` : ''}...`;
         } catch {
+          // Direct web fallback
+          if (query) {
+            window.open(`https://open.spotify.com/search/${encodeURIComponent(query)}`, '_blank');
+            return `Opening Spotify web to search for ${query}.`;
+          }
           toast.info('Opening Spotify');
-          return `I'm trying to open Spotify${query ? ` and play ${query}` : ''}. If it doesn't open, you can do it from your home screen.`;
+          return `I'm trying to open Spotify. If it doesn't open, you can do it from your home screen.`;
         }
       }
       
