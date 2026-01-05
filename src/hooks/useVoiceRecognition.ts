@@ -60,7 +60,7 @@ declare global {
 }
 
 export const useVoiceRecognition = (options: UseVoiceRecognitionOptions = {}) => {
-  const { wakeWords = ['wake up buddy', 'wake up max', 'wakeup buddy', 'wakeup max', 'hey buddy', 'hey max'], onWakeWord, continuous = false } = options;
+  const { wakeWords = ['hey jarvis', 'hi jarvis', 'jarvis', 'wake up buddy', 'wake up max', 'wakeup buddy', 'wakeup max', 'hey buddy', 'hey max'], onWakeWord, continuous = false } = options;
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
