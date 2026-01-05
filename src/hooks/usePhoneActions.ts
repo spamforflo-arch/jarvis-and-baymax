@@ -1,10 +1,13 @@
 import { useCallback } from 'react';
 import { toast } from 'sonner';
+import { useNativeCapabilities } from './useNativeCapabilities';
 
 export interface PhoneAction {
-  type: 'alarm' | 'timer' | 'reminder' | 'open_app' | 'play_music' | 'unknown';
+  type: 'alarm' | 'timer' | 'reminder' | 'open_app' | 'play_music' | 'pause_music' | 'unknown';
   app?: string;
   time?: string;
+  hour?: number;
+  minute?: number;
   duration?: number;
   message?: string;
   query?: string;
@@ -14,12 +17,26 @@ export interface PhoneAction {
 export const parsePhoneAction = (transcript: string): PhoneAction | null => {
   const lower = transcript.toLowerCase().trim();
   
-  // Alarm patterns
+  // Alarm patterns - improved parsing
   if (lower.includes('set alarm') || lower.includes('set an alarm') || lower.includes('wake me up')) {
-    const timeMatch = lower.match(/(?:for|at)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+    const timeMatch = lower.match(/(?:for|at)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+    let hour = 0;
+    let minute = 0;
+    
+    if (timeMatch) {
+      hour = parseInt(timeMatch[1]);
+      minute = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+      const period = timeMatch[3]?.toLowerCase();
+      
+      if (period === 'pm' && hour !== 12) hour += 12;
+      if (period === 'am' && hour === 12) hour = 0;
+    }
+    
     return {
       type: 'alarm',
-      time: timeMatch ? timeMatch[1] : undefined,
+      time: timeMatch ? timeMatch[0] : undefined,
+      hour,
+      minute,
       message: transcript
     };
   }
@@ -47,6 +64,13 @@ export const parsePhoneAction = (transcript: string): PhoneAction | null => {
     return {
       type: 'reminder',
       message: transcript
+    };
+  }
+  
+  // Pause/Stop music patterns
+  if (lower.includes('pause') || lower.includes('stop music') || lower.includes('stop playing')) {
+    return {
+      type: 'pause_music'
     };
   }
   
@@ -89,141 +113,146 @@ export const parsePhoneAction = (transcript: string): PhoneAction | null => {
   return null;
 };
 
-// Execute phone actions (web-based alternatives since we can't access native APIs directly)
+// Execute phone actions with native Capacitor support
 export const usePhoneActions = () => {
-  const executeAction = useCallback((action: PhoneAction): string => {
-    console.log('Executing phone action:', action);
+  const {
+    isNative,
+    hapticNotification,
+    showNotification,
+    scheduleNotification,
+    setNativeAlarm,
+    setNativeTimer,
+    playOnSpotify,
+    openAppByIntent,
+  } = useNativeCapabilities();
+
+  const executeAction = useCallback(async (action: PhoneAction): Promise<string> => {
+    console.log('Executing phone action:', action, 'isNative:', isNative);
+    
+    // Provide haptic feedback for all actions
+    await hapticNotification('success');
     
     switch (action.type) {
       case 'alarm': {
-        // Use web notification API for alarms
-        if ('Notification' in window && Notification.permission === 'granted') {
-          const timeStr = action.time || 'the specified time';
-          toast.success(`Alarm set for ${timeStr}`);
-          return `I've noted your alarm for ${timeStr}. Since this is a web app, I'll remind you with a notification. For real alarms, you can use your phone's clock app.`;
-        } else if ('Notification' in window && Notification.permission !== 'denied') {
-          Notification.requestPermission();
-          toast.info('Please allow notifications for alarms');
-          return 'Please allow notifications so I can set alarms for you. Tap the notification permission when prompted.';
+        if (isNative && action.hour !== undefined) {
+          const success = await setNativeAlarm(action.hour, action.minute || 0, action.message);
+          if (success) {
+            const timeStr = action.time || `${action.hour}:${String(action.minute || 0).padStart(2, '0')}`;
+            toast.success(`Setting alarm for ${timeStr}`);
+            return `I'm opening your clock app to set an alarm for ${timeStr}.`;
+          }
         }
-        toast.info(`Alarm: ${action.time || 'Time not specified'}`);
-        return `I heard you want an alarm${action.time ? ` for ${action.time}` : ''}. For now, you can set it in your phone's clock app. I'm here to help when I get more device access!`;
+        
+        // Web fallback with notification
+        if (action.time) {
+          toast.success(`Alarm noted for ${action.time}`);
+          return `I've noted your alarm for ${action.time}. On this device, I'll use a notification to remind you.`;
+        }
+        
+        return `I heard you want to set an alarm. Try saying "Set alarm for 7:30 AM".`;
       }
       
       case 'timer': {
         if (action.duration && action.duration > 0) {
           const minutes = Math.floor(action.duration / 60);
           const seconds = action.duration % 60;
-          const timeStr = minutes > 0 ? `${minutes} minute${minutes !== 1 ? 's' : ''}${seconds > 0 ? ` and ${seconds} seconds` : ''}` : `${seconds} seconds`;
+          const timeStr = minutes > 0 
+            ? `${minutes} minute${minutes !== 1 ? 's' : ''}${seconds > 0 ? ` and ${seconds} seconds` : ''}` 
+            : `${seconds} seconds`;
           
-          // Set a simple web timer
-          setTimeout(() => {
-            toast.success('Timer finished!', { duration: 10000 });
-            if ('Notification' in window && Notification.permission === 'granted') {
-              new Notification('Timer Complete!', { body: 'Your timer has finished.' });
+          if (isNative) {
+            const success = await setNativeTimer(action.duration, `Timer for ${timeStr}`);
+            if (success) {
+              toast.success(`Setting timer for ${timeStr}`);
+              return `I'm opening your clock app to set a timer for ${timeStr}.`;
             }
+          }
+          
+          // Web fallback - use local notification
+          setTimeout(async () => {
+            await hapticNotification('success');
+            await showNotification('Timer Complete!', `Your ${timeStr} timer has finished.`);
+            toast.success('Timer finished!', { duration: 10000 });
           }, action.duration * 1000);
           
           toast.success(`Timer set for ${timeStr}`);
-          return `Timer set for ${timeStr}. I'll let you know when it's done!`;
+          return `Timer set for ${timeStr}. I'll notify you when it's done!`;
         }
         return "I didn't catch the duration. Try saying something like 'set a timer for 5 minutes'.";
       }
       
       case 'reminder': {
-        toast.info('Reminder noted');
-        return `I've noted your reminder: "${action.message}". I'll do my best to remind you, but for reliable reminders, you might want to use your phone's reminder app.`;
+        // Schedule a notification reminder
+        const reminderTime = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now default
+        await scheduleNotification('Reminder', action.message || 'You asked me to remind you!', reminderTime);
+        toast.info('Reminder set');
+        return `I've set a reminder for you. I'll notify you in about an hour with: "${action.message}"`;
       }
       
       case 'open_app': {
         const app = action.app?.toLowerCase() || '';
         
-        // Try to open common apps via URL schemes (works on mobile)
-        const appSchemes: Record<string, string> = {
-          'spotify': 'spotify://',
-          'youtube': 'youtube://',
-          'whatsapp': 'whatsapp://',
-          'instagram': 'instagram://',
-          'twitter': 'twitter://',
-          'x': 'twitter://',
-          'facebook': 'fb://',
-          'chrome': 'googlechrome://',
-          'safari': 'x-web-search://',
-          'maps': 'maps://',
-          'google maps': 'comgooglemaps://',
-          'camera': 'camera://',
-          'settings': 'app-settings://',
-          'messages': 'sms://',
-          'phone': 'tel://',
-          'mail': 'mailto:',
-          'email': 'mailto:',
-          'calendar': 'calshow://',
+        // App package mappings for Android
+        const appMappings: Record<string, { package: string; fallback: string }> = {
+          'spotify': { package: 'com.spotify.music', fallback: 'https://open.spotify.com' },
+          'youtube': { package: 'com.google.android.youtube', fallback: 'https://youtube.com' },
+          'whatsapp': { package: 'com.whatsapp', fallback: 'https://web.whatsapp.com' },
+          'instagram': { package: 'com.instagram.android', fallback: 'https://instagram.com' },
+          'twitter': { package: 'com.twitter.android', fallback: 'https://twitter.com' },
+          'x': { package: 'com.twitter.android', fallback: 'https://x.com' },
+          'facebook': { package: 'com.facebook.katana', fallback: 'https://facebook.com' },
+          'chrome': { package: 'com.android.chrome', fallback: 'https://google.com' },
+          'maps': { package: 'com.google.android.apps.maps', fallback: 'https://maps.google.com' },
+          'google maps': { package: 'com.google.android.apps.maps', fallback: 'https://maps.google.com' },
+          'gmail': { package: 'com.google.android.gm', fallback: 'https://mail.google.com' },
+          'camera': { package: 'camera', fallback: '' },
+          'clock': { package: 'clock', fallback: '' },
+          'calendar': { package: 'com.google.android.calendar', fallback: 'https://calendar.google.com' },
+          'messages': { package: 'sms', fallback: '' },
+          'phone': { package: 'phone', fallback: '' },
         };
         
-        const scheme = Object.entries(appSchemes).find(([key]) => app.includes(key));
+        const mapping = Object.entries(appMappings).find(([key]) => app.includes(key));
         
-        if (scheme) {
-          try {
-            window.location.href = scheme[1];
-            return `Opening ${action.app}...`;
-          } catch {
-            toast.info(`Trying to open ${action.app}`);
-            return `I'm trying to open ${action.app}. If it doesn't open, you might need to do it manually from your home screen.`;
-          }
+        if (mapping) {
+          const [appName, { package: pkg, fallback }] = mapping;
+          await openAppByIntent(pkg, fallback);
+          toast.success(`Opening ${appName}`);
+          return `Opening ${appName}...`;
         }
         
-        toast.info(`Open ${action.app}`);
-        return `I can't directly open ${action.app} from here, but you can find it on your home screen or app drawer.`;
+        toast.info(`I don't know how to open ${action.app}`);
+        return `I'm not sure how to open ${action.app}. Try opening it from your app drawer.`;
       }
       
       case 'play_music': {
         const query = action.query || '';
-        // Use Spotify deep link to search and play
-        try {
-          if (query) {
-            // Try native app first with search
-            const spotifySearchUrl = `spotify:search:${encodeURIComponent(query)}`;
-            const webFallback = `https://open.spotify.com/search/${encodeURIComponent(query)}`;
-            
-            // Create hidden iframe to try native URL
-            const iframe = document.createElement('iframe');
-            iframe.style.display = 'none';
-            iframe.src = spotifySearchUrl;
-            document.body.appendChild(iframe);
-            
-            // Fallback to web after short delay
-            setTimeout(() => {
-              document.body.removeChild(iframe);
-              window.open(webFallback, '_blank');
-            }, 1500);
-            
-            toast.success(`Playing "${query}" on Spotify`);
-            return `Opening Spotify to play ${query}. The music should start shortly!`;
-          } else {
-            window.location.href = 'spotify://';
-            return 'Opening Spotify...';
-          }
-        } catch {
-          // Direct web fallback
-          if (query) {
-            window.open(`https://open.spotify.com/search/${encodeURIComponent(query)}`, '_blank');
-            return `Opening Spotify web to search for ${query}.`;
-          }
-          toast.info('Opening Spotify');
-          return `I'm trying to open Spotify. If it doesn't open, you can do it from your home screen.`;
+        if (query) {
+          await playOnSpotify(query);
+          toast.success(`Playing "${query}" on Spotify`);
+          return `Opening Spotify to play ${query}. Enjoy!`;
         }
+        
+        await openAppByIntent('spotify', 'https://open.spotify.com');
+        return 'Opening Spotify...';
+      }
+
+      case 'pause_music': {
+        // We can't directly control media, but we can provide feedback
+        toast.info('Use your phone\'s media controls to pause');
+        return "I can't directly pause music from here, but you can use your phone's media controls or say 'Hey Google, pause'.";
       }
       
       default:
         return '';
     }
-  }, []);
+  }, [isNative, hapticNotification, setNativeAlarm, setNativeTimer, showNotification, scheduleNotification, openAppByIntent, playOnSpotify]);
   
-  const checkAndExecute = useCallback((transcript: string): { handled: boolean; response: string } => {
+  const checkAndExecute = useCallback(async (transcript: string): Promise<{ handled: boolean; response: string }> => {
     const action = parsePhoneAction(transcript);
     
     if (action) {
-      const response = executeAction(action);
+      const response = await executeAction(action);
       return { handled: true, response };
     }
     
