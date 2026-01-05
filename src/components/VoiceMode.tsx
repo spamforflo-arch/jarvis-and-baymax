@@ -4,6 +4,7 @@ import { Volume2, VolumeX, Square } from "lucide-react";
 import { useVoiceRecognition } from "@/hooks/useVoiceRecognition";
 import { useTextToSpeech } from "@/hooks/useTextToSpeech";
 import { usePhoneActions } from "@/hooks/usePhoneActions";
+import { useNativeCapabilities } from "@/hooks/useNativeCapabilities";
 import { toast } from "sonner";
 
 type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "error";
@@ -21,6 +22,7 @@ const VoiceMode = () => {
   });
 
   const { checkAndExecute } = usePhoneActions();
+  const { hapticImpact, hapticNotification, showNotification, isNative } = useNativeCapabilities();
 
   const stopEverything = useCallback(() => {
     console.log("Stopping everything");
@@ -64,8 +66,11 @@ const VoiceMode = () => {
 
     console.log("Processing voice input:", transcript);
 
+    // Haptic feedback when processing starts
+    await hapticImpact('light');
+
     // Check for phone actions first
-    const phoneAction = checkAndExecute(transcript);
+    const phoneAction = await checkAndExecute(transcript);
     if (phoneAction.handled) {
       console.log("Phone action handled:", phoneAction.response);
       setLastResponse(phoneAction.response);
@@ -129,6 +134,12 @@ const VoiceMode = () => {
       setLastResponse(fullResponse || "I'm here to help!");
       processingRef.current = false;
       
+      // Haptic feedback and notification for AI response
+      await hapticNotification('success');
+      if (isNative) {
+        await showNotification('Warm AI', fullResponse?.substring(0, 100) || "I'm here to help!");
+      }
+      
       // Speak the response
       await speakResponse(fullResponse || "I'm here to help!");
       
@@ -138,6 +149,7 @@ const VoiceMode = () => {
         return;
       }
       console.error("Voice chat error:", error);
+      await hapticNotification('error');
       toast.error("Failed to process your request");
       setVoiceState("error");
       setTimeout(() => setVoiceState("idle"), 2000);
@@ -145,7 +157,7 @@ const VoiceMode = () => {
       processingRef.current = false;
       abortControllerRef.current = null;
     }
-  }, [checkAndExecute, speakResponse]);
+  }, [checkAndExecute, speakResponse, hapticImpact, hapticNotification, showNotification, isNative]);
 
   const { 
     isListening, 
@@ -156,10 +168,11 @@ const VoiceMode = () => {
     isSupported: sttSupported,
     error: sttError
   } = useVoiceRecognition({
-    wakeWords: ["wake up buddy", "wake up max", "wakeup buddy", "wakeup max"],
-    onWakeWord: () => {
+    wakeWords: ["wake up buddy", "wake up max", "wakeup buddy", "wakeup max", "hey buddy", "hey max"],
+    onWakeWord: async () => {
       console.log("Wake word detected!");
       if (voiceState === "idle") {
+        await hapticImpact('medium');
         toast.success("I'm listening!");
         startVoiceInteraction();
       }
@@ -207,8 +220,11 @@ const VoiceMode = () => {
     setVoiceState("listening");
   }, [sttSupported, resetTranscript, startListening, stopEverything]);
 
-  const handleFaceClick = useCallback(() => {
+  const handleFaceClick = useCallback(async () => {
     console.log("Face clicked, current state:", voiceState);
+    
+    // Haptic feedback on tap
+    await hapticImpact('light');
     
     if (voiceState === "idle") {
       startVoiceInteraction();
@@ -217,15 +233,16 @@ const VoiceMode = () => {
     } else if (voiceState === "speaking" || voiceState === "thinking") {
       stopEverything();
     }
-  }, [voiceState, startVoiceInteraction, stopListening, stopEverything]);
+  }, [voiceState, startVoiceInteraction, stopListening, stopEverything, hapticImpact]);
 
-  const handleMuteToggle = useCallback(() => {
+  const handleMuteToggle = useCallback(async () => {
+    await hapticImpact('light');
     setIsMuted(!isMuted);
     if (isSpeaking) {
       stopSpeaking();
       setVoiceState("idle");
     }
-  }, [isMuted, isSpeaking, stopSpeaking]);
+  }, [isMuted, isSpeaking, stopSpeaking, hapticImpact]);
 
   const isProcessing = voiceState === "thinking" || voiceState === "speaking" || voiceState === "listening";
 
