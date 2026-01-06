@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
-import WebToggle from "./WebToggle";
-import { Sparkles } from "lucide-react";
-import { useStreamChat } from "@/hooks/useStreamChat";
+import { Sparkles, Shield, Trash2 } from "lucide-react";
+import { useLocalAI } from "@/hooks/useLocalAI";
+import { useLocalConversationHistory } from "@/hooks/useLocalConversationHistory";
 import { toast } from "sonner";
 
 interface Message {
@@ -14,9 +14,21 @@ interface Message {
 
 const TextMode = () => {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [webEnabled, setWebEnabled] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { streamChat, isLoading } = useStreamChat();
+  const [isLoading, setIsLoading] = useState(false);
+  const { streamResponse } = useLocalAI();
+  const { addMessage, clearHistory, messages: storedMessages, isLoading: historyLoading } = useLocalConversationHistory();
+
+  // Load stored messages on mount
+  useEffect(() => {
+    if (!historyLoading && storedMessages.length > 0) {
+      setMessages(storedMessages.map((m, i) => ({
+        id: `stored-${i}`,
+        role: m.role,
+        content: m.content,
+      })));
+    }
+  }, [historyLoading, storedMessages]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -26,6 +38,12 @@ const TextMode = () => {
     scrollToBottom();
   }, [messages]);
 
+  const handleClearHistory = () => {
+    clearHistory();
+    setMessages([]);
+    toast.success("Conversation cleared (local only)");
+  };
+
   const handleSend = async (content: string) => {
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -33,7 +51,9 @@ const TextMode = () => {
       content,
     };
     setMessages((prev) => [...prev, userMessage]);
+    addMessage({ role: 'user', content });
 
+    setIsLoading(true);
     let assistantContent = "";
     const assistantId = (Date.now() + 1).toString();
 
@@ -43,31 +63,27 @@ const TextMode = () => {
       { id: assistantId, role: "assistant", content: "" },
     ]);
 
-    const chatMessages = [...messages, userMessage].map((m) => ({
+    const conversationContext = messages.map(m => ({
       role: m.role,
       content: m.content,
     }));
 
-    await streamChat({
-      messages: chatMessages,
-      webEnabled,
-      onDelta: (delta) => {
-        assistantContent += delta;
+    await streamResponse(
+      content,
+      conversationContext as any,
+      (chunk) => {
+        assistantContent += chunk;
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, content: assistantContent } : m
           )
         );
       },
-      onDone: () => {
-        // Done streaming
-      },
-      onError: (error) => {
-        toast.error(error);
-        // Remove the empty assistant message on error
-        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
-      },
-    });
+      () => {
+        setIsLoading(false);
+        addMessage({ role: 'assistant', content: assistantContent });
+      }
+    );
   };
 
   return (
@@ -79,8 +95,20 @@ const TextMode = () => {
             <Sparkles className="w-4 h-4 text-primary" />
           </div>
           <span className="font-semibold text-primary">Jarvis</span>
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-xs">
+            <Shield className="w-3 h-3" />
+            <span>Offline</span>
+          </div>
         </div>
-        <WebToggle enabled={webEnabled} onToggle={setWebEnabled} />
+        {messages.length > 0 && (
+          <button
+            onClick={handleClearHistory}
+            className="p-2 rounded-lg hover:bg-surface-2 text-muted-foreground transition-colors"
+            title="Clear local history"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -94,10 +122,12 @@ const TextMode = () => {
               How can I help you?
             </h2>
             <p className="text-sm text-muted-foreground max-w-xs">
-              {webEnabled 
-                ? "Web mode is on. I can help with detailed and complex questions."
-                : "Ask me anything! Enable Web mode for complex topics."}
+              I'm your offline assistant. All conversations stay private on your device - no data ever leaves your phone.
             </p>
+            <div className="flex items-center gap-1.5 mt-4 px-3 py-1.5 rounded-full bg-green-500/10 text-green-600 text-xs">
+              <Shield className="w-3.5 h-3.5" />
+              <span>100% Private & Offline</span>
+            </div>
           </div>
         ) : (
           <>

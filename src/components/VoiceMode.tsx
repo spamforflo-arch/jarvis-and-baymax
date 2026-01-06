@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import BaymaxFace from "./BaymaxFace";
-import { Volume2, VolumeX, Square, Mic, Bell, Trash2 } from "lucide-react";
+import { Volume2, VolumeX, Square, Mic, Bell, Trash2, Shield } from "lucide-react";
 import { useVoiceRecognition } from "@/hooks/useVoiceRecognition";
 import { useTextToSpeech } from "@/hooks/useTextToSpeech";
 import { usePhoneActions } from "@/hooks/usePhoneActions";
 import { useNativeCapabilities } from "@/hooks/useNativeCapabilities";
-import { useConversationHistory } from "@/hooks/useConversationHistory";
-import { usePermissions } from "@/hooks/usePermissions";
+import { useLocalConversationHistory } from "@/hooks/useLocalConversationHistory";
+import { useLocalAI } from "@/hooks/useLocalAI";
+import { useAndroidPermissions } from "@/hooks/useAndroidPermissions";
 import { toast } from "sonner";
 
 type FaceState = "idle" | "listening" | "thinking" | "speaking" | "error";
@@ -21,7 +22,6 @@ const VoiceMode = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [lastResponse, setLastResponse] = useState<string>("");
   const processingRef = useRef(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   const { speak, stop: stopSpeaking, isSpeaking, isSupported: ttsSupported, voicesLoaded } = useTextToSpeech({
     rate: 1.0,
@@ -30,17 +30,19 @@ const VoiceMode = () => {
 
   const { checkAndExecute } = usePhoneActions();
   const { hapticImpact, hapticNotification, showNotification, isNative } = useNativeCapabilities();
-  const { messages, addMessage, getMessagesForAPI, clearHistory, isLoading: historyLoading } = useConversationHistory();
+  const { messages, addMessage, getMessagesForContext, clearHistory, isLoading: historyLoading } = useLocalConversationHistory();
+  const { processMessage } = useLocalAI();
   const { 
     permissions, 
     hasRequiredPermissions, 
     requestAllPermissions, 
-    isRequestingPermissions 
-  } = usePermissions();
+    isRequestingPermissions,
+    platform,
+  } = useAndroidPermissions();
 
   // Check and request permissions on mount
   useEffect(() => {
-    if (!historyLoading && permissions.microphone === 'prompt') {
+    if (!historyLoading && permissions.microphone !== 'granted') {
       setVoiceState("permissions");
     }
   }, [historyLoading, permissions.microphone]);
@@ -49,18 +51,14 @@ const VoiceMode = () => {
     const results = await requestAllPermissions();
     if (results.microphone) {
       setVoiceState("idle");
-      toast.success("Permissions granted! You can now use voice commands.");
+      toast.success("Permissions granted! Voice commands ready.");
     } else {
-      toast.error("Microphone permission is required for voice commands.");
+      toast.error("Microphone access is required for voice commands.");
     }
   };
 
   const stopEverything = useCallback(() => {
     console.log("Stopping everything");
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
     stopSpeaking();
     processingRef.current = false;
     setVoiceState("idle");
@@ -93,106 +91,52 @@ const VoiceMode = () => {
     setVoiceState("thinking");
     setLastResponse("");
 
-    console.log("Processing voice input:", transcript);
+    console.log("Processing voice input locally:", transcript);
     await hapticImpact('light');
 
-    // Save user message to history
-    await addMessage({ role: 'user', content: transcript });
+    // Save user message locally
+    addMessage({ role: 'user', content: transcript });
 
     // Check for phone actions first
     const phoneAction = await checkAndExecute(transcript);
     if (phoneAction.handled) {
       console.log("Phone action handled:", phoneAction.response);
       setLastResponse(phoneAction.response);
-      await addMessage({ role: 'assistant', content: phoneAction.response });
+      addMessage({ role: 'assistant', content: phoneAction.response });
       processingRef.current = false;
       await speakResponse(phoneAction.response);
       return;
     }
 
-    abortControllerRef.current = new AbortController();
-
     try {
-      // Include conversation history for context
-      const conversationHistory = getMessagesForAPI(10);
+      // Use LOCAL AI - no network calls
+      const conversationContext = getMessagesForContext(10);
+      const response = await processMessage(transcript, conversationContext as any);
       
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: transcript }],
-          conversationHistory,
-          webEnabled: false,
-          isVoiceMode: true,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to get response");
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let fullResponse = "";
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const text = decoder.decode(value, { stream: true });
-          const lines = text.split('\n');
-          
-          for (const line of lines) {
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-              try {
-                const json = JSON.parse(line.slice(6));
-                const content = json.choices?.[0]?.delta?.content;
-                if (content) {
-                  fullResponse += content;
-                }
-              } catch {
-                // Ignore parse errors
-              }
-            }
-          }
-        }
-      }
-
-      console.log("AI response received:", fullResponse);
-      const finalResponse = fullResponse || "I'm here to help!";
-      setLastResponse(finalResponse);
+      console.log("Local AI response:", response);
+      setLastResponse(response);
       
-      // Save assistant response to history
-      await addMessage({ role: 'assistant', content: finalResponse });
+      // Save assistant response locally
+      addMessage({ role: 'assistant', content: response });
       
       await hapticNotification('success');
       if (isNative) {
-        await showNotification('Jarvis', finalResponse.substring(0, 100));
+        await showNotification('Jarvis', response.substring(0, 100));
       }
       
       processingRef.current = false;
-      await speakResponse(finalResponse);
+      await speakResponse(response);
       
     } catch (error) {
-      if ((error as Error).name === 'AbortError') {
-        console.log("Request aborted");
-        return;
-      }
-      console.error("Voice chat error:", error);
+      console.error("Local AI error:", error);
       await hapticNotification('error');
-      toast.error("Failed to process your request");
-      setVoiceState("error");
-      setTimeout(() => setVoiceState("idle"), 2000);
-    } finally {
+      const fallbackResponse = "I had a small hiccup, but I'm here! Try again?";
+      setLastResponse(fallbackResponse);
+      addMessage({ role: 'assistant', content: fallbackResponse });
       processingRef.current = false;
-      abortControllerRef.current = null;
+      await speakResponse(fallbackResponse);
     }
-  }, [checkAndExecute, speakResponse, hapticImpact, hapticNotification, showNotification, isNative, addMessage, getMessagesForAPI]);
+  }, [checkAndExecute, speakResponse, hapticImpact, hapticNotification, showNotification, isNative, addMessage, getMessagesForContext, processMessage]);
 
   const { 
     isListening, 
@@ -251,7 +195,7 @@ const VoiceMode = () => {
     }
     
     if (!sttSupported) {
-      toast.error("Speech recognition is not supported in this browser");
+      toast.error("Speech recognition is not supported");
       return;
     }
     
@@ -287,8 +231,8 @@ const VoiceMode = () => {
 
   const handleClearHistory = useCallback(async () => {
     await hapticImpact('light');
-    await clearHistory();
-    toast.success("Conversation history cleared");
+    clearHistory();
+    toast.success("Conversation cleared (local only)");
   }, [clearHistory, hapticImpact]);
 
   const isProcessing = voiceState === "thinking" || voiceState === "speaking" || voiceState === "listening";
@@ -301,9 +245,12 @@ const VoiceMode = () => {
           <BaymaxFace state="idle" onClick={handleRequestPermissions} />
           
           <div className="text-center space-y-4 max-w-xs">
-            <h2 className="text-lg font-semibold text-foreground">Permissions Required</h2>
+            <div className="flex items-center justify-center gap-2">
+              <Shield className="w-5 h-5 text-primary" />
+              <h2 className="text-lg font-semibold text-foreground">Privacy-First Permissions</h2>
+            </div>
             <p className="text-sm text-muted-foreground">
-              Jarvis needs access to your microphone to hear your voice commands, and notifications to alert you.
+              Jarvis needs microphone access for voice commands. All processing happens locally on your device - no data is ever sent anywhere.
             </p>
             
             <div className="flex flex-col gap-3 mt-6">
@@ -313,18 +260,23 @@ const VoiceMode = () => {
                 className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-medium transition-all hover:opacity-90 disabled:opacity-50"
               >
                 <Mic className="w-5 h-5" />
-                {isRequestingPermissions ? "Requesting..." : "Grant Permissions"}
+                {isRequestingPermissions ? "Requesting..." : "Grant Microphone Access"}
               </button>
               
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <div className="flex items-center gap-1">
-                  <Mic className="w-4 h-4" />
-                  <span>Microphone: {permissions.microphone}</span>
+              <div className="flex flex-col gap-2 text-xs text-muted-foreground">
+                <div className="flex items-center justify-center gap-4">
+                  <div className="flex items-center gap-1">
+                    <Mic className="w-4 h-4" />
+                    <span>Mic: {permissions.microphone}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Bell className="w-4 h-4" />
+                    <span>Notif: {permissions.notifications}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <Bell className="w-4 h-4" />
-                  <span>Notifications: {permissions.notifications}</span>
-                </div>
+                <p className="text-center text-muted-foreground/60">
+                  Platform: {platform} | {isNative ? 'Native' : 'Web'}
+                </p>
               </div>
             </div>
           </div>
@@ -341,7 +293,7 @@ const VoiceMode = () => {
           <button
             onClick={handleClearHistory}
             className="w-10 h-10 rounded-full flex items-center justify-center transition-all pastel-border bg-surface-2/50 text-muted-foreground hover:bg-surface-2"
-            title="Clear conversation history"
+            title="Clear local history"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -368,6 +320,14 @@ const VoiceMode = () => {
             <Volume2 className="w-5 h-5" />
           )}
         </button>
+      </div>
+
+      {/* Privacy indicator */}
+      <div className="absolute top-4 left-4">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 text-green-600 text-xs">
+          <Shield className="w-3 h-3" />
+          <span>Offline</span>
+        </div>
       </div>
 
       {/* Baymax Face */}
@@ -411,7 +371,7 @@ const VoiceMode = () => {
         )}
         {messages.length > 0 && (
           <p className="text-xs text-muted-foreground/40 text-center mt-1">
-            {messages.length} messages in history
+            {messages.length} messages stored locally
           </p>
         )}
       </div>
