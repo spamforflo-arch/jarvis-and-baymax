@@ -5,13 +5,75 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Input validation constants
+const MAX_MESSAGES = 50;
+const MAX_MESSAGE_LENGTH = 10000;
+const MAX_HISTORY_LENGTH = 100;
+const ALLOWED_ROLES = ['user', 'assistant', 'system'];
+
+// Validate a single message object
+const isValidMessage = (msg: unknown): msg is { role: string; content: string } => {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  if (typeof m.role !== 'string' || !ALLOWED_ROLES.includes(m.role)) return false;
+  if (typeof m.content !== 'string') return false;
+  if (m.content.length > MAX_MESSAGE_LENGTH) return false;
+  return true;
+};
+
+// Validate messages array
+const validateMessages = (messages: unknown): boolean => {
+  if (!Array.isArray(messages)) return false;
+  if (messages.length === 0 || messages.length > MAX_MESSAGES) return false;
+  return messages.every(isValidMessage);
+};
+
+// Validate conversation history
+const validateHistory = (history: unknown): boolean => {
+  if (history === undefined || history === null) return true;
+  if (!Array.isArray(history)) return false;
+  if (history.length > MAX_HISTORY_LENGTH) return false;
+  return history.every(isValidMessage);
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { messages, webEnabled, isVoiceMode, conversationHistory } = await req.json();
+    const body = await req.json();
+    
+    // Validate required fields exist
+    if (typeof body !== 'object' || body === null) {
+      return new Response(JSON.stringify({ error: "Invalid request body" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { messages, webEnabled, isVoiceMode, conversationHistory } = body;
+
+    // Validate messages array
+    if (!validateMessages(messages)) {
+      return new Response(JSON.stringify({ error: "Invalid messages format" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Validate boolean fields (allow undefined, coerce to boolean)
+    const validWebEnabled = Boolean(webEnabled);
+    const validIsVoiceMode = Boolean(isVoiceMode);
+
+    // Validate conversation history
+    if (!validateHistory(conversationHistory)) {
+      return new Response(JSON.stringify({ error: "Invalid conversation history format" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
@@ -21,7 +83,7 @@ serve(async (req) => {
     // More conversational, personality-driven prompts
     let systemPrompt: string;
     
-    if (isVoiceMode) {
+    if (validIsVoiceMode) {
       // Voice mode: Warm, caring, conversational like a friend
       systemPrompt = `You are Jarvis, a warm, friendly AI companion with a caring personality like Baymax from Big Hero 6.
 
@@ -44,7 +106,7 @@ HONESTY:
 - Never make up facts or statistics
 - If uncertain, say "I'm not totally sure, but..." or suggest checking online
 - Be direct and helpful, not verbose`;
-    } else if (webEnabled) {
+    } else if (validWebEnabled) {
       // Text mode with web: Intelligent, thorough, but still friendly
       systemPrompt = `You are Jarvis, an intelligent and friendly AI assistant with the warmth of Baymax.
 
@@ -85,13 +147,24 @@ HONESTY:
 - Recommend reliable sources when appropriate`;
     }
 
-    console.log("Chat request - webEnabled:", webEnabled, "isVoiceMode:", isVoiceMode, "historyLength:", conversationHistory?.length || 0);
+    console.log("Chat request - webEnabled:", validWebEnabled, "isVoiceMode:", validIsVoiceMode, "historyLength:", conversationHistory?.length || 0);
+
+    // Filter and sanitize validated messages
+    const sanitizedHistory = (conversationHistory || []).map((msg: { role: string; content: string }) => ({
+      role: msg.role,
+      content: msg.content.slice(0, MAX_MESSAGE_LENGTH),
+    }));
+
+    const sanitizedMessages = messages.map((msg: { role: string; content: string }) => ({
+      role: msg.role,
+      content: msg.content.slice(0, MAX_MESSAGE_LENGTH),
+    }));
 
     // Combine conversation history with current messages
     const allMessages = [
       { role: "system", content: systemPrompt },
-      ...(conversationHistory || []),
-      ...messages,
+      ...sanitizedHistory,
+      ...sanitizedMessages,
     ];
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
