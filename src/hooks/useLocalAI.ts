@@ -483,9 +483,14 @@ const INTENT_PATTERNS: Array<{ patterns: RegExp[]; intent: string }> = [
   { patterns: [/\b(pomodoro|pomodoro technique|focus technique)\b/i], intent: 'prodPomodoro' },
 ];
 
-// Math calculation parser
+// Safe math expression parser using expr-eval (no code execution)
+import { Parser } from 'expr-eval';
+
+const mathParser = new Parser();
+
+// Math calculation parser - uses safe expr-eval library instead of Function constructor
 const calculateMath = (input: string): string | null => {
-  // Clean the input
+  // Clean the input - convert natural language to math symbols
   const cleaned = input.toLowerCase()
     .replace(/what('s| is|s)/gi, '')
     .replace(/calculate/gi, '')
@@ -495,27 +500,35 @@ const calculateMath = (input: string): string | null => {
     .replace(/divided by/gi, '/')
     .replace(/plus/gi, '+')
     .replace(/minus/gi, '-')
-    .replace(/x/gi, '*')
+    .replace(/\bx\b/gi, '*')
     .trim();
 
-  // Simple math expression pattern
+  // Simple math expression pattern - only allow safe characters
   const mathPattern = /^[\d\s+\-*/().]+$/;
   
   // Extract just the math part
   const mathMatch = cleaned.match(/[\d\s+\-*/().]+/);
   if (mathMatch && mathMatch[0]) {
     const expression = mathMatch[0].trim();
+    // Validate expression only contains safe characters and has at least one digit
     if (mathPattern.test(expression) && expression.match(/\d/)) {
       try {
-        // Safe eval using Function constructor (still processes only numbers and operators)
+        // Clean expression to only safe characters
         const safeExpression = expression.replace(/[^0-9+\-*/().]/g, '');
-        if (safeExpression) {
-          const result = new Function(`return ${safeExpression}`)();
+        if (safeExpression && safeExpression.length <= 100) {
+          // Use expr-eval for safe math parsing - no code execution possible
+          const result = mathParser.evaluate(safeExpression);
+          // Validate result is a safe number within bounds
           if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
-            return `${safeExpression} = ${result}`;
+            // Limit result precision and check bounds
+            if (Math.abs(result) <= Number.MAX_SAFE_INTEGER) {
+              const displayResult = Number.isInteger(result) ? result : parseFloat(result.toFixed(10));
+              return `${safeExpression} = ${displayResult}`;
+            }
           }
         }
       } catch (e) {
+        // expr-eval throws on invalid expressions - this is expected and safe
         return null;
       }
     }
