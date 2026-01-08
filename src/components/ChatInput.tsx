@@ -1,5 +1,6 @@
-import { useState, KeyboardEvent } from "react";
+import { useState, KeyboardEvent, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
+import { useNativeCapabilities } from "@/hooks/useNativeCapabilities";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -8,11 +9,26 @@ interface ChatInputProps {
 
 const ChatInput = ({ onSend, disabled }: ChatInputProps) => {
   const [input, setInput] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { hapticImpact } = useNativeCapabilities();
 
-  const handleSend = () => {
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+    }
+  }, [input]);
+
+  const handleSend = async () => {
     if (input.trim() && !disabled) {
+      await hapticImpact('light');
       onSend(input.trim());
       setInput("");
+      // Reset height after send
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
     }
   };
 
@@ -23,26 +39,35 @@ const ChatInput = ({ onSend, disabled }: ChatInputProps) => {
     }
   };
 
+  const hasInput = input.trim().length > 0;
+
   return (
-    <div className="relative flex items-end gap-2 p-4 glass-panel border-t border-border/50">
+    <div className="relative flex items-end gap-2 p-3 glass-panel border-t border-border/30 safe-area-bottom">
       <div className="flex-1 relative">
         <textarea
+          ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type a message..."
           disabled={disabled}
           rows={1}
-          className="w-full px-4 py-3 pr-12 bg-surface-2/80 pastel-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all"
-          style={{ minHeight: "48px", maxHeight: "120px" }}
+          className="w-full px-4 py-2.5 bg-surface-2/90 pastel-border rounded-2xl text-sm text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all disabled:opacity-50"
+          style={{ minHeight: "44px", maxHeight: "120px" }}
+          aria-label="Message input"
         />
       </div>
       <button
         onClick={handleSend}
-        disabled={!input.trim() || disabled}
-        className="flex-shrink-0 w-12 h-12 rounded-xl bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-glow-sm transition-all duration-300"
+        disabled={!hasInput || disabled}
+        className={`flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-200 active:scale-90 ${
+          hasInput && !disabled
+            ? "bg-primary text-primary-foreground shadow-glow-sm"
+            : "bg-surface-2 text-muted-foreground/40"
+        }`}
+        aria-label="Send message"
       >
-        <Send className="w-5 h-5" />
+        <Send className={`w-4.5 h-4.5 transition-transform ${hasInput ? "translate-x-0.5" : ""}`} />
       </button>
     </div>
   );

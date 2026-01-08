@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import BaymaxFace from "./BaymaxFace";
-import { Volume2, VolumeX, Square, Mic, Bell, Trash2, Shield } from "lucide-react";
+import { Volume2, VolumeX, Square, Mic, Bell, Trash2, Shield, ChevronRight } from "lucide-react";
 import { useVoiceRecognition } from "@/hooks/useVoiceRecognition";
 import { useTextToSpeech } from "@/hooks/useTextToSpeech";
 import { usePhoneActions } from "@/hooks/usePhoneActions";
@@ -41,7 +41,6 @@ const VoiceMode = () => {
   } = useAndroidPermissions();
 
   // Only show permissions screen if we've confirmed mic is not granted
-  // Don't show while still checking (unknown state)
   useEffect(() => {
     if (!historyLoading && permissions.microphone !== 'granted' && permissions.microphone !== 'unknown') {
       setVoiceState("permissions");
@@ -51,11 +50,14 @@ const VoiceMode = () => {
   }, [historyLoading, permissions.microphone, voiceState]);
 
   const handleRequestPermissions = async () => {
+    await hapticImpact('medium');
     const results = await requestAllPermissions();
     if (results.microphone) {
       setVoiceState("idle");
+      await hapticNotification('success');
       toast.success("Permissions granted! Voice commands ready.");
     } else {
+      await hapticNotification('error');
       toast.error("Microphone access is required for voice commands.");
     }
   };
@@ -69,17 +71,14 @@ const VoiceMode = () => {
 
   const speakResponse = useCallback(async (text: string) => {
     if (!text || isMuted || !ttsSupported) {
-      console.log("Skipping TTS - muted:", isMuted, "supported:", ttsSupported);
       setVoiceState("idle");
       return;
     }
 
-    console.log("Starting TTS for response");
     setVoiceState("speaking");
     
     try {
       await speak(text);
-      console.log("TTS completed");
     } catch (err) {
       console.error("TTS error:", err);
     } finally {
@@ -94,7 +93,6 @@ const VoiceMode = () => {
     setVoiceState("thinking");
     setLastResponse("");
 
-    console.log("Processing voice input locally:", transcript);
     await hapticImpact('light');
 
     // Save user message locally
@@ -103,7 +101,6 @@ const VoiceMode = () => {
     // Check for phone actions first
     const phoneAction = await checkAndExecute(transcript);
     if (phoneAction.handled) {
-      console.log("Phone action handled:", phoneAction.response);
       setLastResponse(phoneAction.response);
       addMessage({ role: 'assistant', content: phoneAction.response });
       processingRef.current = false;
@@ -116,10 +113,7 @@ const VoiceMode = () => {
       const conversationContext = getMessagesForContext(10);
       const response = await processMessage(transcript, conversationContext as any);
       
-      console.log("Local AI response:", response);
       setLastResponse(response);
-      
-      // Save assistant response locally
       addMessage({ role: 'assistant', content: response });
       
       await hapticNotification('success');
@@ -156,7 +150,6 @@ const VoiceMode = () => {
       "hey buddy", "hey max", "hi buddy", "hi max"
     ],
     onWakeWord: async () => {
-      console.log("Wake word detected!");
       if (voiceState === "idle" && hasRequiredPermissions) {
         await hapticImpact('medium');
         toast.success("I'm listening!");
@@ -185,7 +178,6 @@ const VoiceMode = () => {
 
   useEffect(() => {
     if (!isListening && transcript && voiceState === "listening" && !processingRef.current) {
-      console.log("Transcript complete, processing:", transcript);
       handleVoiceResult(transcript);
       resetTranscript();
     }
@@ -209,7 +201,6 @@ const VoiceMode = () => {
   }, [hasRequiredPermissions, sttSupported, resetTranscript, startListening, stopEverything]);
 
   const handleFaceClick = useCallback(async () => {
-    console.log("Face clicked, current state:", voiceState);
     await hapticImpact('light');
     
     if (voiceState === "permissions") {
@@ -221,7 +212,7 @@ const VoiceMode = () => {
     } else if (voiceState === "speaking" || voiceState === "thinking") {
       stopEverything();
     }
-  }, [voiceState, startVoiceInteraction, stopListening, stopEverything, hapticImpact]);
+  }, [voiceState, startVoiceInteraction, stopListening, stopEverything, hapticImpact, handleRequestPermissions]);
 
   const handleMuteToggle = useCallback(async () => {
     await hapticImpact('light');
@@ -230,67 +221,80 @@ const VoiceMode = () => {
       stopSpeaking();
       setVoiceState("idle");
     }
+    toast.success(isMuted ? "Sound enabled" : "Sound muted");
   }, [isMuted, isSpeaking, stopSpeaking, hapticImpact]);
 
   const handleClearHistory = useCallback(async () => {
-    await hapticImpact('light');
+    await hapticImpact('medium');
     clearHistory();
-    toast.success("Conversation cleared (local only)");
+    setLastResponse("");
+    toast.success("Conversation cleared");
   }, [clearHistory, hapticImpact]);
 
   const isProcessing = voiceState === "thinking" || voiceState === "speaking" || voiceState === "listening";
 
-  // Permission request UI - only show when we know permissions are not granted
+  // Permission request UI
   const showPermissionScreen = voiceState === "permissions" || 
     (!hasRequiredPermissions && permissions.microphone !== 'unknown' && !historyLoading);
     
   if (showPermissionScreen) {
     return (
       <div className="flex flex-col items-center justify-center h-full px-6 slide-up">
-        <div className="flex-1 flex flex-col items-center justify-center gap-8">
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 max-w-sm">
           <BaymaxFace state="idle" onClick={handleRequestPermissions} />
           
-          <div className="text-center space-y-4 max-w-xs">
+          <div className="text-center space-y-3">
             <div className="flex items-center justify-center gap-2">
               <Shield className="w-5 h-5 text-primary" />
-              <h2 className="text-lg font-semibold text-foreground">Privacy-First Permissions</h2>
+              <h2 className="text-lg font-semibold text-foreground">Privacy-First Voice</h2>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Tap the button below to allow microphone access. This triggers the {isNative ? 'Android' : 'browser'} permission dialog. All processing stays on your device.
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Tap the button below to grant microphone access. All processing stays on your device.
             </p>
-            
-            <div className="flex flex-col gap-3 mt-6">
-              <button
-                onClick={handleRequestPermissions}
-                disabled={isRequestingPermissions}
-                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-medium transition-all hover:opacity-90 disabled:opacity-50 active:scale-95"
-              >
-                <Mic className="w-5 h-5" />
-                {isRequestingPermissions ? "Opening Permission Dialog..." : "Allow Microphone Access"}
-              </button>
-              
-              {permissions.microphone === 'denied' && (
-                <p className="text-xs text-destructive text-center">
-                  Permission was denied. Please enable microphone access in your {isNative ? 'Android Settings > Apps > jarvis-and-baymax > Permissions' : 'browser settings'}.
-                </p>
-              )}
-              
-              <div className="flex flex-col gap-2 text-xs text-muted-foreground mt-2">
-                <div className="flex items-center justify-center gap-4">
-                  <div className={`flex items-center gap-1 ${permissions.microphone === 'granted' ? 'text-green-500' : permissions.microphone === 'denied' ? 'text-red-500' : ''}`}>
-                    <Mic className="w-4 h-4" />
-                    <span>Mic: {permissions.microphone}</span>
-                  </div>
-                  <div className={`flex items-center gap-1 ${permissions.notifications === 'granted' ? 'text-green-500' : permissions.notifications === 'denied' ? 'text-red-500' : ''}`}>
-                    <Bell className="w-4 h-4" />
-                    <span>Notif: {permissions.notifications}</span>
-                  </div>
-                </div>
-                <p className="text-center text-muted-foreground/60">
-                  Platform: {platform} | {isNative ? 'Native Android' : 'Web Browser'}
-                </p>
+          </div>
+          
+          {/* Permission Button */}
+          <button
+            onClick={handleRequestPermissions}
+            disabled={isRequestingPermissions}
+            className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-2xl bg-primary text-primary-foreground font-medium transition-all active:scale-[0.98] disabled:opacity-50 shadow-glow-sm"
+          >
+            <Mic className="w-5 h-5" />
+            <span>{isRequestingPermissions ? "Requesting..." : "Allow Microphone Access"}</span>
+            <ChevronRight className="w-4 h-4 ml-auto" />
+          </button>
+          
+          {permissions.microphone === 'denied' && (
+            <div className="w-full p-3 rounded-xl bg-destructive/10 border border-destructive/20">
+              <p className="text-xs text-destructive text-center leading-relaxed">
+                Permission denied. Please enable microphone in {isNative ? 'Settings → Apps → jarvis-and-baymax → Permissions' : 'browser settings'}.
+              </p>
+            </div>
+          )}
+          
+          {/* Permission Status */}
+          <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground/70">
+            <div className="flex items-center gap-4">
+              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full ${
+                permissions.microphone === 'granted' ? 'bg-green-500/10 text-green-500' : 
+                permissions.microphone === 'denied' ? 'bg-red-500/10 text-red-500' : 
+                'bg-surface-2/50'
+              }`}>
+                <Mic className="w-3 h-3" />
+                <span className="capitalize">{permissions.microphone}</span>
+              </div>
+              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full ${
+                permissions.notifications === 'granted' ? 'bg-green-500/10 text-green-500' : 
+                permissions.notifications === 'denied' ? 'bg-red-500/10 text-red-500' : 
+                'bg-surface-2/50'
+              }`}>
+                <Bell className="w-3 h-3" />
+                <span className="capitalize">{permissions.notifications}</span>
               </div>
             </div>
+            <p className="text-muted-foreground/50">
+              {isNative ? 'Native Android' : 'Web Browser'} • {platform}
+            </p>
           </div>
         </div>
       </div>
@@ -298,14 +302,15 @@ const VoiceMode = () => {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center h-full px-6 slide-up">
+    <div className="flex flex-col items-center justify-center h-full px-6 slide-up relative">
       {/* Top controls */}
-      <div className="absolute top-4 right-4 flex gap-2">
+      <div className="absolute top-3 right-3 flex gap-2 z-10">
         {messages.length > 0 && (
           <button
             onClick={handleClearHistory}
-            className="w-10 h-10 rounded-full flex items-center justify-center transition-all pastel-border bg-surface-2/50 text-muted-foreground hover:bg-surface-2"
-            title="Clear local history"
+            className="w-10 h-10 rounded-xl flex items-center justify-center transition-all pastel-border bg-surface-2/50 text-muted-foreground hover:bg-surface-2 active:scale-90"
+            title="Clear conversation"
+            aria-label="Clear conversation history"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -313,37 +318,35 @@ const VoiceMode = () => {
         {isProcessing && (
           <button
             onClick={stopEverything}
-            className="w-10 h-10 rounded-full flex items-center justify-center transition-all pastel-border bg-destructive/20 text-destructive hover:bg-destructive/30"
+            className="w-10 h-10 rounded-xl flex items-center justify-center transition-all pastel-border bg-destructive/15 text-destructive hover:bg-destructive/25 active:scale-90"
+            aria-label="Stop"
           >
             <Square className="w-4 h-4 fill-current" />
           </button>
         )}
         <button
           onClick={handleMuteToggle}
-          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all pastel-border ${
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all pastel-border active:scale-90 ${
             isMuted
               ? "bg-surface-2/70 text-muted-foreground"
               : "bg-primary/12 text-primary"
           }`}
+          aria-label={isMuted ? "Unmute" : "Mute"}
         >
-          {isMuted ? (
-            <VolumeX className="w-5 h-5" />
-          ) : (
-            <Volume2 className="w-5 h-5" />
-          )}
+          {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
         </button>
       </div>
 
       {/* Privacy indicator */}
-      <div className="absolute top-4 left-4">
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 text-green-600 text-xs">
+      <div className="absolute top-3 left-3">
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-green-500/10 text-green-500 text-xs font-medium">
           <Shield className="w-3 h-3" />
           <span>Offline</span>
         </div>
       </div>
 
       {/* Baymax Face */}
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center pb-8">
         <BaymaxFace 
           state={getFaceState(voiceState)} 
           onClick={handleFaceClick} 
@@ -352,37 +355,37 @@ const VoiceMode = () => {
 
       {/* Transcript display */}
       {isListening && transcript && (
-        <div className="absolute bottom-32 left-4 right-4">
-          <div className="glass-panel rounded-xl px-4 py-3 text-center">
+        <div className="absolute bottom-36 left-4 right-4">
+          <div className="glass-panel rounded-2xl px-4 py-3 text-center">
             <p className="text-sm text-foreground">{transcript}</p>
           </div>
         </div>
       )}
 
       {/* Response text */}
-      <div className="h-24 flex items-start justify-center text-center px-4">
+      <div className="h-20 flex items-start justify-center text-center px-6">
         {lastResponse && (
-          <p className="text-sm text-muted-foreground max-w-xs fade-in line-clamp-3">
+          <p className="text-sm text-muted-foreground max-w-xs fade-in line-clamp-3 leading-relaxed">
             {lastResponse}
           </p>
         )}
       </div>
 
-      {/* Wake word hint */}
-      <div className="pb-8">
-        <p className="text-xs text-muted-foreground/60 text-center">
+      {/* Bottom hints */}
+      <div className="pb-6 space-y-1">
+        <p className="text-xs text-muted-foreground/50 text-center">
           {sttSupported 
             ? 'Say "Hey Jarvis" or tap the face'
             : 'Tap the face to speak'}
         </p>
         {sttError && (
-          <p className="text-xs text-destructive text-center mt-1">{sttError}</p>
+          <p className="text-xs text-destructive text-center">{sttError}</p>
         )}
         {!voicesLoaded && ttsSupported && (
-          <p className="text-xs text-muted-foreground/40 text-center mt-1">Loading voices...</p>
+          <p className="text-xs text-muted-foreground/30 text-center">Loading voices...</p>
         )}
         {messages.length > 0 && (
-          <p className="text-xs text-muted-foreground/40 text-center mt-1">
+          <p className="text-xs text-muted-foreground/30 text-center">
             {messages.length} messages stored locally
           </p>
         )}
