@@ -40,12 +40,15 @@ const VoiceMode = () => {
     platform,
   } = useAndroidPermissions();
 
-  // Check and request permissions on mount
+  // Only show permissions screen if we've confirmed mic is not granted
+  // Don't show while still checking (unknown state)
   useEffect(() => {
-    if (!historyLoading && permissions.microphone !== 'granted') {
+    if (!historyLoading && permissions.microphone !== 'granted' && permissions.microphone !== 'unknown') {
       setVoiceState("permissions");
+    } else if (permissions.microphone === 'granted' && voiceState === 'permissions') {
+      setVoiceState("idle");
     }
-  }, [historyLoading, permissions.microphone]);
+  }, [historyLoading, permissions.microphone, voiceState]);
 
   const handleRequestPermissions = async () => {
     const results = await requestAllPermissions();
@@ -237,8 +240,11 @@ const VoiceMode = () => {
 
   const isProcessing = voiceState === "thinking" || voiceState === "speaking" || voiceState === "listening";
 
-  // Permission request UI
-  if (voiceState === "permissions" || (!hasRequiredPermissions && !historyLoading)) {
+  // Permission request UI - only show when we know permissions are not granted
+  const showPermissionScreen = voiceState === "permissions" || 
+    (!hasRequiredPermissions && permissions.microphone !== 'unknown' && !historyLoading);
+    
+  if (showPermissionScreen) {
     return (
       <div className="flex flex-col items-center justify-center h-full px-6 slide-up">
         <div className="flex-1 flex flex-col items-center justify-center gap-8">
@@ -250,32 +256,38 @@ const VoiceMode = () => {
               <h2 className="text-lg font-semibold text-foreground">Privacy-First Permissions</h2>
             </div>
             <p className="text-sm text-muted-foreground">
-              Jarvis needs microphone access for voice commands. All processing happens locally on your device - no data is ever sent anywhere.
+              Tap the button below to allow microphone access. This triggers the {isNative ? 'Android' : 'browser'} permission dialog. All processing stays on your device.
             </p>
             
             <div className="flex flex-col gap-3 mt-6">
               <button
                 onClick={handleRequestPermissions}
                 disabled={isRequestingPermissions}
-                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-medium transition-all hover:opacity-90 disabled:opacity-50"
+                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-medium transition-all hover:opacity-90 disabled:opacity-50 active:scale-95"
               >
                 <Mic className="w-5 h-5" />
-                {isRequestingPermissions ? "Requesting..." : "Grant Microphone Access"}
+                {isRequestingPermissions ? "Opening Permission Dialog..." : "Allow Microphone Access"}
               </button>
               
-              <div className="flex flex-col gap-2 text-xs text-muted-foreground">
+              {permissions.microphone === 'denied' && (
+                <p className="text-xs text-destructive text-center">
+                  Permission was denied. Please enable microphone access in your {isNative ? 'Android Settings > Apps > jarvis-and-baymax > Permissions' : 'browser settings'}.
+                </p>
+              )}
+              
+              <div className="flex flex-col gap-2 text-xs text-muted-foreground mt-2">
                 <div className="flex items-center justify-center gap-4">
-                  <div className="flex items-center gap-1">
+                  <div className={`flex items-center gap-1 ${permissions.microphone === 'granted' ? 'text-green-500' : permissions.microphone === 'denied' ? 'text-red-500' : ''}`}>
                     <Mic className="w-4 h-4" />
                     <span>Mic: {permissions.microphone}</span>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className={`flex items-center gap-1 ${permissions.notifications === 'granted' ? 'text-green-500' : permissions.notifications === 'denied' ? 'text-red-500' : ''}`}>
                     <Bell className="w-4 h-4" />
                     <span>Notif: {permissions.notifications}</span>
                   </div>
                 </div>
                 <p className="text-center text-muted-foreground/60">
-                  Platform: {platform} | {isNative ? 'Native' : 'Web'}
+                  Platform: {platform} | {isNative ? 'Native Android' : 'Web Browser'}
                 </p>
               </div>
             </div>

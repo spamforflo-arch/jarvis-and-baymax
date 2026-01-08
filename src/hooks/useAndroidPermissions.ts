@@ -1,9 +1,10 @@
 /**
  * Android Native Permissions Handler
  * Uses Capacitor for proper native Android permission requests
+ * Fixed to properly request permissions on native platforms
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 
@@ -12,22 +13,19 @@ interface PermissionState {
   notifications: 'granted' | 'denied' | 'prompt' | 'unknown';
 }
 
-// For Android, we need to handle permissions differently
-// The SpeechRecognition API on Android WebView requires RECORD_AUDIO permission
-// which is requested when you first try to use the microphone
-
 export const useAndroidPermissions = () => {
   const [permissions, setPermissions] = useState<PermissionState>({
     microphone: 'unknown',
     notifications: 'unknown',
   });
   const [isRequestingPermissions, setIsRequestingPermissions] = useState(false);
+  const hasCheckedRef = useRef(false);
   
   const isNative = Capacitor.isNativePlatform();
   const platform = Capacitor.getPlatform();
 
   // Check notification permissions
-  const checkNotificationPermission = useCallback(async () => {
+  const checkNotificationPermission = useCallback(async (): Promise<'granted' | 'denied' | 'prompt' | 'unknown'> => {
     try {
       if (isNative) {
         const result = await LocalNotifications.checkPermissions();
@@ -39,30 +37,31 @@ export const useAndroidPermissions = () => {
     } catch (e) {
       console.error('Error checking notification permission:', e);
     }
-    return 'unknown' as const;
+    return 'unknown';
   }, [isNative]);
 
-  // Check microphone by attempting to get media stream
-  const checkMicrophonePermission = useCallback(async () => {
+  // Check microphone permission
+  const checkMicrophonePermission = useCallback(async (): Promise<'granted' | 'denied' | 'prompt' | 'unknown'> => {
     try {
-      // Try to query permission state first
+      // Try to query permission state first (works on web and some native)
       if ('permissions' in navigator) {
         try {
           const result = await navigator.permissions.query({ 
             name: 'microphone' as PermissionName 
           });
-          return result.state as 'granted' | 'denied' | 'prompt';
+          if (result.state === 'granted' || result.state === 'denied') {
+            return result.state as 'granted' | 'denied';
+          }
         } catch {
           // permissions.query may not support microphone on all platforms
         }
       }
       
-      // On Android native, we need to try accessing the mic
-      // The permission prompt will appear on first access
-      return 'prompt' as const;
+      // On Android native, we assume prompt until user tries to access
+      return 'prompt';
     } catch (e) {
       console.error('Error checking microphone permission:', e);
-      return 'unknown' as const;
+      return 'unknown';
     }
   }, []);
 
@@ -82,10 +81,11 @@ export const useAndroidPermissions = () => {
     return newState;
   }, [checkMicrophonePermission, checkNotificationPermission]);
 
-  // Request microphone permission
+  // Request microphone permission - this MUST trigger native Android dialog
   const requestMicrophonePermission = useCallback(async (): Promise<boolean> => {
+    console.log('Requesting microphone permission...');
     try {
-      // Request microphone access - this triggers the native permission dialog on Android
+      // This triggers the native Android permission dialog
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
@@ -97,26 +97,36 @@ export const useAndroidPermissions = () => {
       // Stop all tracks after getting permission
       stream.getTracks().forEach(track => track.stop());
       
+      console.log('Microphone permission granted!');
       setPermissions(prev => ({ ...prev, microphone: 'granted' }));
       return true;
-    } catch (e) {
+    } catch (e: any) {
       console.error('Microphone permission denied:', e);
-      setPermissions(prev => ({ ...prev, microphone: 'denied' }));
+      // Check if it's a permission denial vs other error
+      if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+        setPermissions(prev => ({ ...prev, microphone: 'denied' }));
+      } else {
+        // Other errors (no microphone, etc) - still mark as denied for UX
+        setPermissions(prev => ({ ...prev, microphone: 'denied' }));
+      }
       return false;
     }
   }, []);
 
   // Request notification permission
   const requestNotificationPermission = useCallback(async (): Promise<boolean> => {
+    console.log('Requesting notification permission...');
     try {
       if (isNative) {
         const result = await LocalNotifications.requestPermissions();
         const granted = result.display === 'granted';
+        console.log('Notification permission result:', result.display);
         setPermissions(prev => ({ ...prev, notifications: granted ? 'granted' : 'denied' }));
         return granted;
       } else if ('Notification' in window) {
         const result = await Notification.requestPermission();
         const granted = result === 'granted';
+        console.log('Notification permission result:', result);
         setPermissions(prev => ({ ...prev, notifications: granted ? 'granted' : 'denied' }));
         return granted;
       }
@@ -128,8 +138,9 @@ export const useAndroidPermissions = () => {
     }
   }, [isNative]);
 
-  // Request all permissions in sequence
+  // Request all permissions in sequence - THIS ACTUALLY TRIGGERS DIALOGS
   const requestAllPermissions = useCallback(async () => {
+    console.log('Starting permission request flow...');
     setIsRequestingPermissions(true);
     
     const results = {
@@ -138,21 +149,28 @@ export const useAndroidPermissions = () => {
     };
 
     // Request microphone first (most important for voice assistant)
+    // This WILL trigger the native Android permission dialog
     results.microphone = await requestMicrophonePermission();
+    console.log('Microphone result:', results.microphone);
     
     // Small delay between permission requests for better UX
     await new Promise(resolve => setTimeout(resolve, 500));
     
     // Then notifications
     results.notifications = await requestNotificationPermission();
+    console.log('Notifications result:', results.notifications);
 
     setIsRequestingPermissions(false);
+    console.log('Permission flow complete:', results);
     return results;
   }, [requestMicrophonePermission, requestNotificationPermission]);
 
-  // Check permissions on mount
+  // Check permissions on mount - only once
   useEffect(() => {
-    checkAllPermissions();
+    if (!hasCheckedRef.current) {
+      hasCheckedRef.current = true;
+      checkAllPermissions();
+    }
   }, [checkAllPermissions]);
 
   // Listen for permission changes (when app resumes from settings)
